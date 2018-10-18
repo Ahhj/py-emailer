@@ -1,71 +1,72 @@
 import os
-import re
-import zipfile
-import smtplib
-import sys
-from email.MIMEMultipart import MIMEMultipart
-from email.MIMEBase import MIMEBase
-from email import Encoders
+
+from pathlib import Path
+
+from smtplib import SMTP
+from email.mime.application import MIMEApplication
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.utils import COMMASPACE, formatdate
+
+from dotenv import find_dotenv, load_dotenv
 
 
-"""
-	Required Input:
-		- Source folder (src)
-		- Archive name (dst)
-		- SMTP information
-		- Recipient email
-"""
-DIRECTORY_OF_IMAGES = "D:\Flat-UI-master\images\demo"
-NAME_OF_DESTINATION_ARCHIVE = "test" # test.zip
-SUBJECT = "Test Images Zipped"
-RECIPIENTS = "fake@gmail.com, fake+other@gmail.com" #separated by comma
-
-server = "smtp.gmail.com"
-port = 587
-username = "fake@gmail.com"
-password = "fake"
-sender = username
-isGMAIL = True
-
-# From http://stackoverflow.com/questions/14568647/create-zip-in-python
-def zip(src, dst):
-	zf = zipfile.ZipFile("%s.zip" % (dst), "w")
-	src = os.path.abspath(src)
-	for d, s, f in os.walk(src):
-		for n in f:
-			if re.match(r"^.*[.](png|jpg|gif|jpeg)$", n):
-				abs_name = os.path.abspath(os.path.join(d,n))
-				arc_name = abs_name[len(src) + 1:]
-				zf.write(abs_name, arc_name)
-	zf.close()
+def create_smtp_connection(server, port, user, password):
+    """ Returns smtp object initialised with arguments.
+    """
+    smtp = SMTP()
+    smtp.connect(server, port)
+    smtp.starttls()
+    smtp.login(user, password)
+    return smtp
 
 
-# From http://stackoverflow.com/questions/3362600/how-to-send-email-attachments-with-python
+class Emailer(object):
+    """ Object to send emails using MIME.
+    """
 
-def sendMsg():
-	msg = MIMEMultipart()
-	msg['Subject'] = SUBJECT
-	msg['From'] = sender
-	msg['To'] = RECIPIENTS
+    def __init__(self, send_from):
+        """ Constructor; loads environmental variables.
+        """
+        load_dotenv(find_dotenv())
+        self.send_from = send_from
 
-	part = MIMEBase("application", "octet-stream")
-	part.set_payload(open(NAME_OF_DESTINATION_ARCHIVE + ".zip", "rb").read())
-	Encoders.encode_base64(part)
-	part.add_header("Content-Disposition", "attachment; filename=\"%s.zip\"" % (NAME_OF_DESTINATION_ARCHIVE))
-	msg.attach(part)
+    def send_mail_with_attachment(self,
+                                  recipients,
+                                  subject,
+                                  text,
+                                  attachment_path,
+                                  filename):
+        """ Create and send email.
+        """
+        if isinstance(recipients, str):
+            recipients = recipients.split(",")
+        elif not isinstance(recipients, list):
+            raise TypeError("recipients must be list or string")
 
-	smtp = smtplib.SMTP(server, port)
-	if isGMAIL:
-		smtp.ehlo()
-		smtp.starttls()
-		smtp.ehlo()
-	smtp.login(username,password)
-	smtp.sendmail(sender, RECIPIENTS, msg.as_string())
-	smtp.close()
+        msg = MIMEMultipart()
+        msg["From"] = self.send_from
+        msg["To"] = COMMASPACE.join(recipients)
+        msg["Date"] = formatdate(localtime=True)
+        msg["Subject"] = subject
+        msg.attach(MIMEText(text))
 
-zip(DIRECTORY_OF_IMAGES, NAME_OF_DESTINATION_ARCHIVE)
+        with open(attachment_path, "rb") as attachment_file:
+            attachment = MIMEApplication(attachment_file.read(), Name=filename)
 
-try:
-	sendMsg()
-except Exception, exc:
-    sys.exit( "mail failed; %s" % str(exc) )
+        attachment["Content-Disposition"] = \
+            'attachment; filename="{0}"'.format(filename)
+        msg.attach(attachment)
+
+        with self.connection as smtp:
+            smtp.sendmail(self.send_from, recipients, msg.as_string())
+
+    @property
+    def connection(self):
+        """ Returns connection to AWS server.
+        """
+        server = os.environ.get("SERVER")
+        port = os.environ.get("PORT")
+        user = os.environ.get("UID")
+        password = os.environ.get("PWD")
+        return create_smtp_connection(server, port, user, password)
