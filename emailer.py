@@ -1,7 +1,5 @@
 import os
 
-from pathlib import Path
-
 from smtplib import SMTP
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
@@ -63,7 +61,7 @@ class Emailer(object):
 
     @property
     def connection(self):
-        """ Returns connection to AWS server.
+        """ Returns connection to server.
         """
         server = os.environ.get("SERVER")
         port = os.environ.get("PORT")
